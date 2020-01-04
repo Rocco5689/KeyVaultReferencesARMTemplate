@@ -1,0 +1,246 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "comment": "Creation of Azure Function App, Key Vault, and Storage Account. All in one template adding secrets to Function App App Setting References."
+  },
+  "parameters": {
+    "KeyVaultName": {
+      "defaultValue": "[concat('KeyVaultName', utcNow('fffff'))]",
+      "type": "string",
+      "metadata": {
+        "description": "Key Vault Name"
+      }
+    },
+    "StorageAccountName": {
+      "defaultValue": "[concat('storageacc', utcNow('fffff'))]",
+      "type": "string",
+      "metadata": {
+        "description": "Storage Account Name"
+      }
+    },
+    "AppServicePlanName": {
+      "defaultValue": "[concat('AppServicePlanName', utcNow('fffff'))]",
+      "type": "string",
+      "metadata": {
+        "description": "App Service Plan Name"
+      }
+    },
+    "AppServicePlanSkuName": {
+      "defaultValue": "B1",
+      "type": "string"
+    },
+    "AppServicePlanSkuSize": {
+      "defaultValue": "F",
+
+      "type": "string"
+    },
+    "AppServicePlanSkuCapacity": {
+      "defaultValue": 1,
+      "type": "int"
+    },
+    "FunctionAppName": {
+      "defaultValue": "[concat('AppServicePlanName', utcNow('fffff'))]",
+      "type": "string",
+      "metadata": {
+        "description": "Function App Name"
+      }
+    }
+  },
+  "variables": {
+    "Location": "[resourceGroup().location]",
+    "KeyVaultTenantId": "[subscription().tenantId]",
+    "KeyVaultSku": "Premium",
+    "AzureWebJobsStorageSecretName": "StorageAccount",
+    "StorageAccountType": "Standard_ZRS",
+    "StorageAccountKind": "StorageV2"
+  },
+  "functions": [],
+  "resources": [
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "metadata": {
+        "comment": "Key Vault Resource"
+      },
+      "apiVersion": "2018-02-14",
+      "name": "[parameters('keyVaultName')]",
+      "location": "[variables('location')]",
+      "properties": {
+        "metadata": {
+          "comment": "Access Policy"
+        },
+        "accessPolicies": [],
+        "enabledForDeployment": false,
+        "enabledForDiskEncryption": false,
+        "enabledForTemplateDeployment": false,
+        "tenantId": "[variables('KeyVaultTenantId')]",
+        "sku": {
+          "name": "[variables('KeyVaultSku')]",
+          "family": "A"
+        },
+        "networkAcls": {
+          "value": {
+            "defaultAction": "Allow",
+            "bypass": "AzureServices"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "name": "[parameters('storageAccountName')]",
+      "apiVersion": "2019-04-01",
+      "sku": {
+        "name": "[variables('StorageAccountType')]"
+      },
+      "kind": "[variables('StorageAccountKind')]",
+      "location": "[variables('location')]",
+      "properties": {
+        "supportsHttpsTrafficOnly": true
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2018-02-14",
+      "name": "[concat(parameters('keyVaultName'), '/', variables('AzureWebJobsStorageSecretName'))]",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+      ],
+      "properties": {
+        "metadata": {
+          "comment": "Storage Connection String Secret"
+        },
+        "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', parameters('storageAccountName'), ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')),'2017-06-01').keys[0].value)]"
+      }
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2016-09-01",
+      "name": "[parameters('AppServicePlanName')]",
+      "location": "[variables('location')]",
+      "sku": {
+        "name": "[parameters('AppServicePlanSkuName')]",
+        "tier": "Basic",
+        "size": "[parameters('AppServicePlanSkuSize')]",
+        "family": "B",
+        "capacity": "[parameters('AppServicePlanSkuCapacity')]"
+      },
+      "kind": "app",
+      "properties": {
+        "name": "[parameters('AppServicePlanName')]",
+        "perSiteScaling": false,
+        "reserved": false,
+        "targetWorkerCount": 0,
+        "targetWorkerSizeId": 0
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2016-08-01",
+      "name": "[parameters('FunctionAppName')]",
+      "location": "[variables('Location')]",
+      "kind": "functionapp",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', parameters('AppServicePlanName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('StorageAccountName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults', parameters('KeyVaultName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults/secrets', parameters('KeyVaultName'), variables('AzureWebJobsStorageSecretName'))]"
+      ],
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "enabled": true,
+        "siteConfig": {
+        },
+        "hostNameSslStates": [
+          {
+            "name": "[concat(parameters('functionAppName'), '.azurewebsites.net')]",
+            "sslState": "Disabled",
+            "hostType": "Standard"
+          },
+          {
+            "name": "[concat(parameters('functionAppName'), 'scm.azurewebsites.net')]",
+            "sslState": "Disabled",
+            "hostType": "Repository"
+          }
+        ],
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms/', parameters('AppServicePlanName'))]",
+        "reserved": false,
+        "scmSiteAlsoStopped": false,
+        "clientAffinityEnabled": false,
+        "clientCertEnabled": false,
+        "hostNamesDisabled": false,
+        "containerSize": 1536,
+        "dailyMemoryTimeQuota": 0,
+        "httpsOnly": true
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/accessPolicies",
+      "name": "[concat(parameters('KeyVaultName'), '/' ,'add')]",
+      "apiVersion": "2018-02-14",
+      "metadata": {
+        "comment:": "Access Policies"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('FunctionAppName'))]"
+      ],
+      "properties": {
+        "accessPolicies": [
+          {
+            "tenantId": "[subscription().tenantId]",
+            "objectId": "[reference(resourceId('Microsoft.Web/sites', parameters('FunctionAppName')), '2016-08-01', 'Full').identity.principalId]",
+            "permissions": {
+              "secrets": [
+                "get"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2019-08-01",
+      "name": "[concat(parameters('FunctionAppName'), '/' ,'web')]",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('FunctionAppName'))]"
+      ],
+      "properties": {
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2019-08-01",
+      "name": "[concat(parameters('FunctionAppName'), '/' ,'appsettings')]",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults/accessPolicies', parameters('KeyVaultName'), 'add')]"
+      ],
+      "properties": {
+        "AzureWebJobsStorage": "[concat('@Microsoft.KeyVault(SecretUri=', reference(resourceId('Microsoft.KeyVault/vaults/secrets', parameters('KeyVaultName'), variables('AzureWebJobsStorageSecretName'))).secretUriWithVersion, ')')]",
+        "AzureWebJobsSecretStorageType": "Blob",
+        "FUNCTIONS_WORKER_RUNTIME": "dotnet",
+        "FUNCTIONS_EXTENSION_VERSION": "~2"
+      }
+    },
+    {
+      "apiVersion": "2015-08-01",
+      "name": "[concat(parameters('FunctionAppName'), '/' ,'slotconfignames')]",
+      "type": "Microsoft.Web/sites/config",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('FunctionAppName'))]",
+        "[concat('Microsoft.Web/sites/', parameters('FunctionAppName'), '/config/appsettings')]"
+      ],
+      "properties": {
+        "appSettingNames": [ "AzureWebJobsStorage", "AzureWebJobsSecretStorageType", "FUNCTIONS_WORKER_RUNTIME", "FUNCTIONS_EXTENSION_VERSION" ]
+      }
+    }
+  ],
+
+  "outputs": {}
+}
